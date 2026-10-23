@@ -1,0 +1,79 @@
+# ==============================================================================
+# AI-Meeting-Copilot Root .gitignore
+# ==============================================================================
+
+# Operating System & IDE
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Environment & Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Backend Data, SQLite Database & User Recordings
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
+backend/data/*.sqlite
+backend/data/*.sqlite3
+backend/data/audio/*
+!backend/data/audio/.gitkeep
+!backend/data/sample_meeting.wav
+
+# HuggingFace & Whisper Model Caches
+.cache/
+hf_cache/
+models/
+whisper_models/
+
+# Node & Next.js Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.pnp
+frontend/.pnp.*
+frontend/.yarn/*
+!frontend/.yarn/patches
+!frontend/.yarn/plugins
+!frontend/.yarn/releases
+!frontend/.yarn/versions
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/*.tsbuildinfo
+frontend/.vercel
+
+# General Node / Next.js fallbacks
+node_modules/
+.next/
+dist/
+build/
