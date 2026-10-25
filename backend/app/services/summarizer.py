@@ -176,5 +176,92 @@ class SummarizerService:
 
         return sanitized_summary
 
+    async def generate_followup_email(
+        self,
+        meeting_title: str,
+        created_at: str,
+        summary_data: Dict[str, Any]
+    ) -> str:
+        """
+        Generate a professional stakeholder follow-up email draft based on
+        meeting executive summary, key decisions, and action item assignments.
+        """
+        exec_summary = summary_data.get("executive_summary", "")
+        decisions = summary_data.get("key_decisions", [])
+        action_items = summary_data.get("action_items", [])
+
+        decisions_txt = (
+            "\n".join([f"- {d}" for d in decisions])
+            if decisions
+            else "None formally recorded."
+        )
+        actions_txt = (
+            "\n".join([
+                f"- {item.get('task')} (Owner: {item.get('owner') or 'Unassigned'}, Due: {item.get('due_date') or 'TBD'})"
+                for item in action_items
+            ])
+            if action_items
+            else "None assigned."
+        )
+
+        prompt = f"""You are an executive assistant drafting a crisp, professional post-meeting email.
+Meeting: "{meeting_title}"
+Date: {created_at}
+
+Executive Summary:
+{exec_summary}
+
+Decisions Made:
+{decisions_txt}
+
+Action Items & Owners:
+{actions_txt}
+
+Guidelines:
+1. Include a clear Subject line (e.g., "Subject: Recap & Next Steps - {meeting_title}").
+2. Begin with a concise, polite opening acknowledging the team's discussion.
+3. Structure the body with clear Markdown headings or bullet points: Summary, Key Decisions, and Action Items.
+4. Conclude with an open, professional invitation for corrections or questions.
+5. STRICT INTEGRITY: Do not invent names, dates, or details not present in the summary above.
+"""
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+                "num_predict": 750
+            }
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
+                response = await client.post(f"{self.base_url}/api/generate", json=payload)
+                if response.status_code == 200:
+                    return response.json().get("response", "").strip()
+                raise RuntimeError(f"Ollama returned HTTP {response.status_code}")
+        except Exception as e:
+            logger.error(f"Error generating follow-up email draft: {e}", exc_info=True)
+            # Fallback draft if Ollama is unreachable
+            return f"""Subject: Recap & Action Items: {meeting_title}
+
+Hi team,
+
+Thank you for your time during our meeting on {created_at}. Below is a summary of what was discussed, decided, and assigned:
+
+Summary:
+{exec_summary}
+
+Key Decisions:
+{decisions_txt}
+
+Action Items:
+{actions_txt}
+
+Please let me know if anything needs adjustment.
+
+Best regards,
+Meeting Copilot"""
+
 # Singleton instance
 summarizer_service = SummarizerService()

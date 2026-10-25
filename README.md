@@ -70,11 +70,17 @@ An intelligent, private, and fully local voice assistant and meeting copilot. Bu
   - In-session controls: **Pause**, **Resume**, **Done Speaking**, **Stop Speaking**, and **End Voice Session**.
   - Push-to-talk mic button at the input bar for one-off voice queries.
 
-### 3. Meeting Intelligence & Productivity
+### 3. Meeting Intelligence & Portfolio Differentiating Features
 - **Live Meeting Recording**: WebSocket-streamed live microphone transcription with real-time partial segment updates and resilient background finalization.
-- **Audio Uploads**: Drag-and-drop support for `.mp3`, `.wav`, `.m4a`, `.webm`, and `.ogg` files up to 100 MB.
-- **AI Meeting Summaries**: Executive summary, key discussion points, major decisions, and extracted action items with owner and due date tagging.
-- **FTS5 Transcript Search**: Sub-millisecond full-text search across all recorded transcripts.
+- **Audio Uploads**: Drag-and-drop support for `.mp3`, `.wav`, `.m4a`, and `.webm` files up to 100 MB with client & server-side validation.
+- **AI Structured Summaries**: Executive summary, key discussion points, major decisions, and extracted action items with owner and due date tagging.
+- **Interactive Action Item Checklist**: Direct in-app task completion tracking persisted to SQLite (`PATCH /api/meetings/{id}/action-items/{item_id}`).
+- **Follow-up Stakeholder Email Generator**: One-click AI drafting of professional post-meeting emails with formatted subject line and copy-to-clipboard (`POST /api/meetings/{id}/email-draft`).
+- **One-Click Data Exports**:
+  - **Export Markdown (`.md`)**: Full meeting dossier including metadata, summary, decisions, action checklist, and timestamped transcript.
+  - **Export Tasks CSV (`.csv`)**: Clean CSV export of action item tasks, owners, deadlines, and completion status.
+- **FTS5 Transcript Search**: Sub-millisecond full-text search across all recorded transcripts using SQLite FTS5 with BM25 ranking.
+- **Responsive Dark SaaS UI/UX**: Custom deep-navy aesthetic, active route indicators, mobile navigation drawer, and reduced-motion accessibility.
 
 ---
 
@@ -183,6 +189,9 @@ python test_stage5.py
 
 # 7. Test Stage 5 Finalization: Abrupt Disconnects & Resilience
 python test_stage5_finalization.py
+
+# 8. Test Portfolio Features: Action Items Toggle, Email Drafting, CORS & Health Metadata
+python test_portfolio_features.py
 ```
 
 ### Frontend Production Build Test

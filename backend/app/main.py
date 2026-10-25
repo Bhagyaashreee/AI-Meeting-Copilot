@@ -31,10 +31,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS for local Next.js frontend
+import os
+from app.config import OLLAMA_MODEL
+
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+
+# Enable CORS for local and production Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[origin.strip() for origin in cors_origins if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,5 +55,10 @@ async def health_check():
     return {
         "status": "healthy",
         "app": "AI Meeting Copilot API",
-        "version": "0.3.0"
+        "version": "1.0.0",
+        "engine": {
+            "stt": "faster-whisper (base, int8)",
+            "llm": f"Ollama ({OLLAMA_MODEL})",
+            "database": "SQLite + FTS5"
+        }
     }

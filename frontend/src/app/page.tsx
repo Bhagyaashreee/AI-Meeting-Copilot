@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { 
   Upload, 
@@ -36,20 +36,42 @@ export default function DashboardPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setError(null);
       const data = await getMeetings();
       setMeetings(data);
-    } catch (err: any) {
-      setError(err.message || "Failed to connect to backend server.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to connect to backend server.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadData();
+    let ignore = false;
+    async function init() {
+      try {
+        const data = await getMeetings();
+        if (!ignore) {
+          setMeetings(data);
+        }
+      } catch (err: unknown) {
+        if (!ignore) {
+          const msg = err instanceof Error ? err.message : "Failed to connect to backend server.";
+          setError(msg);
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    }
+    init();
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   // Compute stats
@@ -99,8 +121,9 @@ export default function DashboardPage() {
       if (fileInputRef.current) fileInputRef.current.value = "";
       setUploadProgress(null);
       await loadData();
-    } catch (err: any) {
-      setUploadError(err.message || "Audio upload & transcription failed.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Audio upload & transcription failed.";
+      setUploadError(msg);
     } finally {
       setUploading(false);
       setUploadProgress(null);

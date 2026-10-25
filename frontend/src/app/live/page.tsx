@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { 
   Mic, 
-  MicOff, 
   Play, 
   Pause, 
   Square, 
@@ -13,11 +12,9 @@ import {
   Loader2, 
   CheckCircle2, 
   Clock, 
-  Sparkles, 
-  ArrowRight,
-  ShieldAlert
+  ArrowRight
 } from "lucide-react";
-import { getLiveWebSocketUrl, formatTimestamp } from "@/lib/api";
+import { getLiveWebSocketUrl, formatTimestamp, API_BASE } from "@/lib/api";
 
 interface LiveSegment {
   start_time: number;
@@ -56,14 +53,7 @@ export default function LiveMeetingPage() {
     transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [segments]);
 
-  // Clean up mic tracks & timers when unmounting
-  useEffect(() => {
-    return () => {
-      cleanupResources();
-    };
-  }, []);
-
-  const cleanupResources = () => {
+  const cleanupResources = useCallback(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -84,7 +74,14 @@ export default function LiveMeetingPage() {
       } catch {}
       webSocketRef.current = null;
     }
-  };
+  }, []);
+
+  // Clean up mic tracks & timers when unmounting
+  useEffect(() => {
+    return () => {
+      cleanupResources();
+    };
+  }, [cleanupResources]);
 
   const startRecording = async () => {
     setError(null);
@@ -108,16 +105,18 @@ export default function LiveMeetingPage() {
         },
       });
       mediaStreamRef.current = stream;
-    } catch (err: any) {
+    } catch (err: unknown) {
       setRecordingState("idle");
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      const errName = (err as Error)?.name || "";
+      const errMsg = (err as Error)?.message || "";
+      if (errName === "NotAllowedError" || errName === "PermissionDeniedError") {
         setError(
           "Microphone access was denied. Please allow microphone permissions in your browser address bar to record."
         );
-      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+      } else if (errName === "NotFoundError" || errName === "DevicesNotFoundError") {
         setError("No microphone detected. Please connect an audio input device.");
       } else {
-        setError(`Microphone error: ${err.message || "Failed to access audio hardware."}`);
+        setError(`Microphone error: ${errMsg || "Failed to access audio hardware."}`);
       }
       return;
     }
@@ -141,7 +140,6 @@ export default function LiveMeetingPage() {
     webSocketRef.current = ws;
 
     ws.onopen = () => {
-      // WebSocket open: initialize MediaRecorder
       try {
         const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
         mediaRecorderRef.current = recorder;
@@ -160,8 +158,9 @@ export default function LiveMeetingPage() {
         timerRef.current = setInterval(() => {
           setElapsedSeconds((prev) => prev + 1);
         }, 1000);
-      } catch (err: any) {
-        setError(`Failed to initialize recorder: ${err.message}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Recorder failed";
+        setError(`Failed to initialize recorder: ${msg}`);
         cleanupResources();
         setRecordingState("idle");
       }
@@ -182,8 +181,6 @@ export default function LiveMeetingPage() {
               text: data.text,
             },
           ]);
-        } else if (data.type === "progress" || data.type === "status") {
-          // Backend keepalive or status updates during finalization pass
         } else if (data.type === "completed") {
           setCompletedMeetingId(data.meeting_id);
           setCompletedTitle(data.title);
@@ -212,13 +209,13 @@ export default function LiveMeetingPage() {
       if (state === "recording" || state === "paused") {
         setRecordingState("idle");
       } else if (state === "finalizing") {
-        // If WebSocket closed during finalization, check if database completed the meeting
+        // Fallback polling with environment-based API_BASE
         const mid = currentMeetingIdRef.current;
         if (mid) {
           for (let attempt = 0; attempt < 6; attempt++) {
             await new Promise((r) => setTimeout(r, 1500));
             try {
-              const res = await fetch(`http://localhost:8000/api/meetings/${mid}`);
+              const res = await fetch(`${API_BASE}/api/meetings/${mid}`);
               if (res.ok) {
                 const meetingData = await res.json();
                 if (meetingData.status === "completed") {
@@ -277,7 +274,6 @@ export default function LiveMeetingPage() {
     const ws = webSocketRef.current;
 
     const sendStopCommand = () => {
-      // Release microphone tracks after recorder has completed emitting chunks
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
         mediaStreamRef.current = null;
@@ -288,7 +284,6 @@ export default function LiveMeetingPage() {
     };
 
     if (recorder && recorder.state !== "inactive") {
-      // W3C MediaRecorder fires onstop after the final ondataavailable event
       recorder.onstop = () => {
         sendStopCommand();
       };
@@ -300,7 +295,6 @@ export default function LiveMeetingPage() {
     } else {
       sendStopCommand();
     }
-    // Note: Do NOT close the WebSocket here! Client waits for server's "completed" message.
   };
 
   const formatTimer = (totalSecs: number) => {
@@ -310,7 +304,7 @@ export default function LiveMeetingPage() {
   };
 
   return (
-    <div className="p-8 max-w-5xl mx-auto w-full space-y-8">
+    <div className="p-6 md:p-8 max-w-5xl mx-auto w-full space-y-8">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800/80 pb-6">
         <div>
@@ -326,20 +320,20 @@ export default function LiveMeetingPage() {
         {/* Status Indicator Pill */}
         <div className="flex items-center gap-2">
           {recordingState === "recording" && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold animate-pulse">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold animate-pulse shadow-sm">
               <span className="w-2 h-2 rounded-full bg-rose-500" />
               Recording Active ({formatTimer(elapsedSeconds)})
             </div>
           )}
           {recordingState === "paused" && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold shadow-sm">
               <span className="w-2 h-2 rounded-full bg-amber-500" />
               Paused ({formatTimer(elapsedSeconds)})
             </div>
           )}
           {recordingState === "finalizing" && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-semibold">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-xs font-semibold shadow-sm">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
               Finalizing with Whisper...
             </div>
           )}
@@ -350,16 +344,16 @@ export default function LiveMeetingPage() {
       {error && (
         <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800/50 text-rose-300 flex items-start gap-3 text-sm">
           <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-          <div>
+          <div className="space-y-1">
             <p className="font-semibold">Microphone or Connection Error</p>
-            <p className="text-xs text-rose-300/80 mt-0.5">{error}</p>
+            <p className="text-xs text-rose-300/80">{error}</p>
           </div>
         </div>
       )}
 
       {/* Completion Success Card */}
       {recordingState === "completed" && completedMeetingId && (
-        <div className="p-6 rounded-2xl bg-emerald-950/30 border border-emerald-800/50 space-y-4 text-emerald-200">
+        <div className="p-6 rounded-2xl bg-emerald-950/30 border border-emerald-800/50 space-y-4 text-emerald-200 shadow-sm animate-in fade-in duration-200">
           <div className="flex items-center gap-2.5 font-semibold text-base text-emerald-300">
             <CheckCircle2 className="w-5 h-5 text-emerald-400" />
             Live Meeting Successfully Saved to Database!
@@ -367,10 +361,10 @@ export default function LiveMeetingPage() {
           <p className="text-xs text-emerald-200/80 leading-relaxed">
             Your recording &ldquo;{completedTitle}&rdquo; was transcribed, indexed with SQLite FTS5, and saved in your meeting history.
           </p>
-          <div className="flex flex-wrap items-center gap-3 pt-2">
+          <div className="flex flex-wrap items-center gap-3 pt-1">
             <Link
               href={`/meetings/${completedMeetingId}`}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all"
             >
               View Meeting & Summary <ArrowRight className="w-3.5 h-3.5" />
             </Link>
@@ -381,7 +375,7 @@ export default function LiveMeetingPage() {
                 setSegments([]);
                 setMeetingTitle("");
               }}
-              className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 text-xs font-medium"
+              className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 text-xs font-medium transition-colors"
             >
               Record Another Meeting
             </button>
@@ -390,7 +384,7 @@ export default function LiveMeetingPage() {
       )}
 
       {/* Recording Control Console */}
-      <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 space-y-6">
+      <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 space-y-6 shadow-sm">
         {/* Title Input */}
         <div className="space-y-1.5 max-w-lg">
           <label className="text-xs font-medium text-slate-300">Meeting Title (Optional)</label>
@@ -399,8 +393,8 @@ export default function LiveMeetingPage() {
             value={meetingTitle}
             onChange={(e) => setMeetingTitle(e.target.value)}
             disabled={recordingState !== "idle"}
-            placeholder="e.g. Weekly Product Sync"
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
+            placeholder="e.g. Sprint Planning & Architecture Review"
+            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
           />
         </div>
 
@@ -409,7 +403,7 @@ export default function LiveMeetingPage() {
           {recordingState === "idle" && (
             <button
               onClick={startRecording}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-sm shadow-lg shadow-rose-600/20 transition-all"
+              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-sm shadow-lg shadow-rose-600/20 active:scale-[0.98] transition-all"
             >
               <Mic className="w-4 h-4" />
               Start Recording
@@ -437,11 +431,21 @@ export default function LiveMeetingPage() {
               </button>
               <button
                 onClick={stopRecording}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-600/20 transition-all"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-600/20 active:scale-[0.98] transition-all"
               >
                 <Square className="w-3.5 h-3.5" />
                 Stop & Save Meeting
               </button>
+
+              {/* Sound wave activity indicator */}
+              <div className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800">
+                <div className="w-1 bg-rose-500 rounded-full animate-soundwave-1" />
+                <div className="w-1 bg-rose-500 rounded-full animate-soundwave-2" />
+                <div className="w-1 bg-rose-500 rounded-full animate-soundwave-3" />
+                <div className="w-1 bg-rose-500 rounded-full animate-soundwave-4" />
+                <div className="w-1 bg-rose-500 rounded-full animate-soundwave-5" />
+                <span className="text-[11px] text-slate-400 font-mono pl-1">Live Audio</span>
+              </div>
             </>
           )}
 
@@ -449,14 +453,14 @@ export default function LiveMeetingPage() {
             <>
               <button
                 onClick={resumeRecording}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 active:scale-[0.98] transition-all"
               >
                 <Play className="w-3.5 h-3.5" />
                 Resume Recording
               </button>
               <button
                 onClick={stopRecording}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-600/20 transition-all"
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-600/20 active:scale-[0.98] transition-all"
               >
                 <Square className="w-3.5 h-3.5" />
                 Stop & Save Meeting
@@ -467,13 +471,13 @@ export default function LiveMeetingPage() {
           {recordingState === "finalizing" && (
             <div className="flex items-center gap-2 text-xs text-indigo-300 font-medium py-2">
               <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-              <span>Transcribing final audio with faster-whisper and persisting to SQLite...</span>
+              <span>Transcribing final speech with faster-whisper and persisting to SQLite...</span>
             </div>
           )}
 
           {/* Active Timer Display */}
           {(recordingState === "recording" || recordingState === "paused") && (
-            <div className="ml-auto font-mono text-sm text-slate-300 flex items-center gap-2 bg-slate-950 px-3.5 py-1.5 rounded-lg border border-slate-800">
+            <div className="ml-auto font-mono text-sm text-slate-200 flex items-center gap-2 bg-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-800 shadow-inner">
               <Clock className="w-4 h-4 text-slate-400" />
               <span>{formatTimer(elapsedSeconds)}</span>
             </div>
@@ -481,28 +485,28 @@ export default function LiveMeetingPage() {
         </div>
       </div>
 
-      {/* Live Real-time Transcript Viewer */}
-      <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 space-y-4">
+      {/* Live Real-time Transcript Stream */}
+      <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800/80 space-y-4 shadow-sm">
         <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
             <Radio className="w-4 h-4 text-rose-400" />
-            <span>Live Transcript Stream</span>
+            <span>Live Transcript Feed</span>
           </div>
           <span className="text-xs text-slate-400">
             {segments.length} segment{segments.length === 1 ? "" : "s"} captured
           </span>
         </div>
 
-        <div className="h-[360px] overflow-y-auto space-y-3 pr-2">
+        <div className="h-[380px] overflow-y-auto space-y-3 pr-2">
           {segments.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 space-y-2">
               <Mic className="w-10 h-10 text-slate-600" />
               <p className="text-sm font-medium text-slate-300">
                 {recordingState === "recording"
-                  ? "Listening to microphone... Speech will appear here in seconds."
+                  ? "Listening to microphone... Speech will appear here within seconds."
                   : "Click 'Start Recording' above to begin capturing speech."}
               </p>
-              <p className="text-xs text-slate-400 max-w-sm">
+              <p className="text-xs text-slate-500 max-w-sm">
                 Speech is transcribed in real-time on your laptop CPU using faster-whisper.
               </p>
             </div>

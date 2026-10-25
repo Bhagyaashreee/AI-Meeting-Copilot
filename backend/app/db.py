@@ -28,7 +28,7 @@ def init_db():
     """Initialize SQLite database tables and FTS5 search index."""
     with get_db() as conn:
         cursor = conn.cursor()
-        
+
         # Meetings table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS meetings (
@@ -42,7 +42,7 @@ def init_db():
                 updated_at TEXT NOT NULL
             );
         """)
-        
+
         # Transcript segments table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS transcript_segments (
@@ -55,7 +55,7 @@ def init_db():
                 FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
             );
         """)
-        
+
         # Action items table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS action_items (
@@ -68,7 +68,7 @@ def init_db():
                 FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
             );
         """)
-        
+
         # SQLite FTS5 Virtual Table for full-text search
         cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts USING fts5(
@@ -149,17 +149,17 @@ def save_meeting_summary_and_action_items(
     now = datetime.now().isoformat()
     with get_db() as conn:
         cursor = conn.cursor()
-        
+
         # 1. Update meeting summary
         cursor.execute("""
             UPDATE meetings
             SET summary = ?, updated_at = ?
             WHERE id = ?
         """, (summary_str, now, meeting_id))
-        
+
         # 2. Clear existing action items for idempotency
         cursor.execute("DELETE FROM action_items WHERE meeting_id = ?", (meeting_id,))
-        
+
         # 3. Insert newly extracted action items
         for item in action_items:
             task = (item.get("task") or "").strip()
@@ -177,6 +177,35 @@ def save_meeting_summary_and_action_items(
                 VALUES (?, ?, ?, ?, ?)
             """, (meeting_id, task, owner, due_date, 0))
 
+def toggle_action_item_completed(
+    meeting_id: str,
+    item_id: int,
+    completed: Optional[bool] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Toggle or update the completion status of an action item in SQLite.
+    Returns the updated action item dictionary or None if not found.
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, meeting_id, task, owner, due_date, completed FROM action_items WHERE id = ? AND meeting_id = ?",
+            (item_id, meeting_id)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        current = dict(row)
+        new_status = (1 if completed else 0) if completed is not None else (0 if current["completed"] else 1)
+
+        cursor.execute(
+            "UPDATE action_items SET completed = ? WHERE id = ? AND meeting_id = ?",
+            (new_status, item_id, meeting_id)
+        )
+        current["completed"] = bool(new_status)
+        return current
+
 def save_transcript_segments(meeting_id: str, segments: List[Dict[str, Any]]):
     """Insert transcript segments and populate FTS5 search index."""
     with get_db() as conn:
@@ -189,7 +218,7 @@ def save_transcript_segments(meeting_id: str, segments: List[Dict[str, Any]]):
                 VALUES (?, ?, ?, ?, ?)
             """, (meeting_id, seg["start_time"], seg["end_time"], seg["text"], seg.get("speaker")))
             segment_id = cursor.lastrowid
-            
+
             # Sync to FTS5 index
             cursor.execute("""
                 INSERT INTO transcript_fts (meeting_id, segment_id, text)
@@ -200,7 +229,7 @@ def list_meetings() -> List[Dict[str, Any]]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT 
+            SELECT
                 m.id,
                 m.title,
                 m.audio_filename,
@@ -227,9 +256,9 @@ def get_meeting_details(meeting_id: str) -> Optional[Dict[str, Any]]:
         meeting_row = cursor.fetchone()
         if not meeting_row:
             return None
-        
+
         meeting = dict(meeting_row)
-        
+
         # Fetch segments
         cursor.execute("""
             SELECT id, start_time, end_time, text, speaker
@@ -238,7 +267,7 @@ def get_meeting_details(meeting_id: str) -> Optional[Dict[str, Any]]:
             ORDER BY start_time ASC
         """, (meeting_id,))
         meeting["segments"] = [dict(row) for row in cursor.fetchall()]
-        
+
         # Fetch action items
         cursor.execute("""
             SELECT id, task, owner, due_date, completed
@@ -247,7 +276,7 @@ def get_meeting_details(meeting_id: str) -> Optional[Dict[str, Any]]:
             ORDER BY id ASC
         """, (meeting_id,))
         meeting["action_items"] = [dict(row) for row in cursor.fetchall()]
-        
+
         return meeting
 
 def get_meeting_segments(meeting_id: str) -> List[Dict[str, Any]]:
@@ -267,14 +296,14 @@ def search_transcripts(query: str, limit: int = 20) -> List[Dict[str, Any]]:
     cleaned_query = query.strip()
     if not cleaned_query:
         return []
-        
+
     with get_db() as conn:
         cursor = conn.cursor()
         try:
             # FTS5 search
             safe_query = '"' + cleaned_query.replace('"', '""') + '"'
             cursor.execute("""
-                SELECT 
+                SELECT
                     fts.meeting_id,
                     fts.segment_id,
                     fts.text,
@@ -293,7 +322,7 @@ def search_transcripts(query: str, limit: int = 20) -> List[Dict[str, Any]]:
         except sqlite3.OperationalError:
             # Fallback to standard LIKE
             cursor.execute("""
-                SELECT 
+                SELECT
                     ts.meeting_id,
                     ts.id AS segment_id,
                     ts.text,
@@ -316,17 +345,17 @@ def retrieve_rag_context(query: str, meeting_id: Optional[str] = None, limit: in
     """
     cleaned_query = query.strip()
     words = [w for w in re.findall(r"\w+", cleaned_query) if len(w) > 2]
-    
+
     with get_db() as conn:
         cursor = conn.cursor()
-        
+
         # 1. Try FTS5 with OR-joined keywords if available
         if words:
             fts_query = " OR ".join([f'"{w}"' for w in words[:6]])
             try:
                 if meeting_id:
                     cursor.execute("""
-                        SELECT 
+                        SELECT
                             ts.id AS segment_id,
                             ts.meeting_id,
                             ts.start_time,
@@ -342,7 +371,7 @@ def retrieve_rag_context(query: str, meeting_id: Optional[str] = None, limit: in
                     """, (fts_query, meeting_id, limit))
                 else:
                     cursor.execute("""
-                        SELECT 
+                        SELECT
                             ts.id AS segment_id,
                             ts.meeting_id,
                             ts.start_time,
@@ -361,14 +390,14 @@ def retrieve_rag_context(query: str, meeting_id: Optional[str] = None, limit: in
                     return results
             except sqlite3.OperationalError:
                 pass
-        
+
         # 2. Fallback to LIKE matching
         if words:
             like_clause = " OR ".join(["ts.text LIKE ?" for _ in words[:4]])
             params: List[Any] = [f"%{w}%" for w in words[:4]]
-            
+
             query_sql = f"""
-                SELECT 
+                SELECT
                     ts.id AS segment_id,
                     ts.meeting_id,
                     ts.start_time,
@@ -384,7 +413,7 @@ def retrieve_rag_context(query: str, meeting_id: Optional[str] = None, limit: in
                 params.append(meeting_id)
             query_sql += " ORDER BY ts.start_time ASC LIMIT ?"
             params.append(limit)
-            
+
             cursor.execute(query_sql, tuple(params))
             results = [dict(row) for row in cursor.fetchall()]
             if results:
@@ -393,7 +422,7 @@ def retrieve_rag_context(query: str, meeting_id: Optional[str] = None, limit: in
         # 3. If still empty, return general segments (for summary/context if meeting_id provided)
         if meeting_id:
             cursor.execute("""
-                SELECT 
+                SELECT
                     ts.id AS segment_id,
                     ts.meeting_id,
                     ts.start_time,
