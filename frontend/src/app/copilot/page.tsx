@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { 
@@ -18,7 +18,6 @@ import {
   VolumeX,
   X,
   Volume1,
-  MessageSquare,
   FileText,
   Play,
   Pause,
@@ -28,7 +27,7 @@ import {
 } from "lucide-react";
 import { 
   askCopilot, 
-  voiceChatCopilot,
+  voiceChatCopilot, 
   getMeetings, 
   MeetingSummary, 
   ReferenceItem, 
@@ -48,6 +47,70 @@ interface ChatMessage {
 
 type PushToTalkState = "idle" | "requesting" | "recording" | "processing";
 type ContinuousVoiceState = "idle" | "listening" | "thinking" | "speaking" | "paused";
+
+/**
+ * Safe message ID generator declared outside component render scope
+ */
+let messageIdCounter = 0;
+function createChatMessageId(prefix: "user" | "copilot"): string {
+  messageIdCounter += 1;
+  return `${prefix}-${Date.now()}-${messageIdCounter}`;
+}
+
+/**
+ * Safe timestamp reader declared outside component render scope
+ */
+function getTimestampNow(): number {
+  return Date.now();
+}
+
+/**
+ * External store subscription and snapshots for SpeechSynthesis support
+ */
+function subscribeSpeech() {
+  return () => {};
+}
+function getSpeechSnapshot(): boolean {
+  return typeof window !== "undefined" && "speechSynthesis" in window;
+}
+function getSpeechServerSnapshot(): boolean {
+  return false;
+}
+
+/**
+ * External store subscription and snapshots for browser voices
+ */
+let cachedVoices: SpeechSynthesisVoice[] = [];
+let hasAttemptedInitialFetch = false;
+function subscribeVoices(callback: () => void) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return () => {};
+  }
+  const handler = () => {
+    cachedVoices = window.speechSynthesis.getVoices();
+    callback();
+  };
+  window.speechSynthesis.addEventListener("voiceschanged", handler);
+  return () => {
+    window.speechSynthesis.removeEventListener("voiceschanged", handler);
+  };
+}
+function getVoicesSnapshot(): SpeechSynthesisVoice[] {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return cachedVoices;
+  }
+  if (!hasAttemptedInitialFetch) {
+    hasAttemptedInitialFetch = true;
+    const initial = window.speechSynthesis.getVoices();
+    if (initial.length > 0) {
+      cachedVoices = initial;
+    }
+  }
+  return cachedVoices;
+}
+function getVoicesServerSnapshot(): SpeechSynthesisVoice[] {
+  return cachedVoices;
+}
 
 /**
  * Strips markdown symbols, citation brackets, and URLs so browser TTS
@@ -129,8 +192,8 @@ function CopilotChatInner() {
   const [audioLevel, setAudioLevel] = useState(0);
 
   // Speech synthesis (TTS) state
-  const [speechSupported, setSpeechSupported] = useState(false);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const speechSupported = useSyncExternalStore(subscribeSpeech, getSpeechSnapshot, getSpeechServerSnapshot);
+  const voices = useSyncExternalStore(subscribeVoices, getVoicesSnapshot, getVoicesServerSnapshot);
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [activeSpeakingId, setActiveSpeakingId] = useState<string | null>(null);
   const [ttsError, setTtsError] = useState<string | null>(null);
@@ -154,22 +217,20 @@ function CopilotChatInner() {
 
   // Sync state refs for event listeners and timeouts
   const modeRef = useRef(mode);
-  modeRef.current = mode;
-
   const continuousActiveRef = useRef(continuousActive);
-  continuousActiveRef.current = continuousActive;
-
   const continuousStateRef = useRef(continuousState);
-  continuousStateRef.current = continuousState;
-
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
-  voicesRef.current = voices;
-
   const autoSpeakRef = useRef(autoSpeak);
-  autoSpeakRef.current = autoSpeak;
-
   const messagesRef = useRef<ChatMessage[]>([]);
-  messagesRef.current = messages;
+
+  useEffect(() => {
+    modeRef.current = mode;
+    continuousActiveRef.current = continuousActive;
+    continuousStateRef.current = continuousState;
+    voicesRef.current = voices;
+    autoSpeakRef.current = autoSpeak;
+    messagesRef.current = messages;
+  }, [mode, continuousActive, continuousState, voices, autoSpeak, messages]);
 
   // Build clean conversation history for Ollama context memory
   const getRecentHistoryPayload = useCallback((): ChatHistoryItem[] => {
@@ -179,59 +240,8 @@ function CopilotChatInner() {
     }));
   }, []);
 
-  // Diagnostic loader for browser speech synthesis voices
-  const populateVoices = useCallback(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      setSpeechSupported(false);
-      return;
-    }
-
-    try {
-      const available = window.speechSynthesis.getVoices();
-      if (available.length > 0) {
-        setVoices(available);
-        setSpeechSupported(true);
-      }
-    } catch (e) {
-      console.error("[SpeechSynthesis] Error retrieving browser voices:", e);
-    }
-  }, []);
-
-  // Initialize meetings & configure voice synthesis listeners
-  useEffect(() => {
-    getMeetings()
-      .then((data) => setMeetings(data))
-      .catch(() => {});
-
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      setSpeechSupported(true);
-      populateVoices();
-
-      if (window.speechSynthesis.onvoiceschanged !== undefined) {
-        window.speechSynthesis.onvoiceschanged = () => {
-          populateVoices();
-        };
-      }
-      window.speechSynthesis.addEventListener("voiceschanged", populateVoices);
-    } else {
-      setSpeechSupported(false);
-    }
-
-    return () => {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.removeEventListener("voiceschanged", populateVoices);
-      }
-      cleanupAllAudioResources();
-    };
-  }, [populateVoices]);
-
-  // Auto-scroll on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading, pushVoiceState, continuousState]);
-
   // --- Audio Cleanup Utilities ---
-  const stopAudioAnalyser = () => {
+  const stopAudioAnalyser = useCallback(() => {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
@@ -246,9 +256,28 @@ function CopilotChatInner() {
     }
     analyserRef.current = null;
     setAudioLevel(0);
-  };
+  }, []);
 
-  const cleanupAllAudioResources = () => {
+  const stopSpeaking = useCallback(() => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel();
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+      } catch (e) {
+        console.warn("[SpeechSynthesis] Notice while cancelling speech:", e);
+      }
+    }
+    if (speechKeepAliveRef.current) {
+      clearInterval(speechKeepAliveRef.current);
+      speechKeepAliveRef.current = null;
+    }
+    currentUtteranceRef.current = null;
+    setActiveSpeakingId(null);
+  }, []);
+
+  const cleanupAllAudioResources = useCallback(() => {
     stopSpeaking();
     stopAudioAnalyser();
 
@@ -271,27 +300,29 @@ function CopilotChatInner() {
       abortControllerRef.current = null;
     }
     audioChunksRef.current = [];
-  };
+  }, [stopSpeaking, stopAudioAnalyser]);
 
-  // --- Browser Speech Synthesis Controls ---
-  const stopSpeaking = () => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      try {
-        window.speechSynthesis.cancel();
-        if (window.speechSynthesis.paused) {
-          window.speechSynthesis.resume();
+  // Initialize meetings & configure voice synthesis cleanup
+  useEffect(() => {
+    let ignore = false;
+    getMeetings()
+      .then((data) => {
+        if (!ignore) {
+          setMeetings(data);
         }
-      } catch (e) {
-        console.warn("[SpeechSynthesis] Notice while cancelling speech:", e);
-      }
-    }
-    if (speechKeepAliveRef.current) {
-      clearInterval(speechKeepAliveRef.current);
-      speechKeepAliveRef.current = null;
-    }
-    currentUtteranceRef.current = null;
-    setActiveSpeakingId(null);
-  };
+      })
+      .catch(() => {});
+
+    return () => {
+      ignore = true;
+      cleanupAllAudioResources();
+    };
+  }, [cleanupAllAudioResources]);
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading, pushVoiceState, continuousState]);
 
   /**
    * Speaks given text using browser SpeechSynthesis API with strong GC reference,
@@ -324,11 +355,8 @@ function CopilotChatInner() {
     }
 
     let availableVoices = voicesRef.current;
-    if (availableVoices.length === 0) {
+    if (availableVoices.length === 0 && typeof window !== "undefined" && "speechSynthesis" in window) {
       availableVoices = window.speechSynthesis.getVoices();
-      if (availableVoices.length > 0) {
-        setVoices(availableVoices);
-      }
     }
 
     const chosenVoice = selectBestVoice(availableVoices);
@@ -385,8 +413,9 @@ function CopilotChatInner() {
           if (window.speechSynthesis.paused) {
             window.speechSynthesis.resume();
           }
-        } catch (err: any) {
-          setTtsError(`Failed to start speech playback: ${err.message || "Unknown error"}`);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          setTtsError(`Failed to start speech playback: ${msg}`);
           setActiveSpeakingId(null);
           currentUtteranceRef.current = null;
           onPlaybackFinished?.();
@@ -400,8 +429,9 @@ function CopilotChatInner() {
         }
       }, 12000);
 
-    } catch (err: any) {
-      setTtsError(`Speech synthesis initialization failed: ${err.message || "Unknown error"}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setTtsError(`Speech synthesis initialization failed: ${msg}`);
       setActiveSpeakingId(null);
       currentUtteranceRef.current = null;
       onPlaybackFinished?.();
@@ -432,7 +462,7 @@ function CopilotChatInner() {
     setError(null);
     setTtsError(null);
 
-    const userMsgId = Date.now().toString();
+    const userMsgId = createChatMessageId("user");
     const userMsg: ChatMessage = {
       id: userMsgId,
       sender: "user",
@@ -452,7 +482,7 @@ function CopilotChatInner() {
         history: historyPayload,
       });
 
-      const copilotMsgId = (Date.now() + 1).toString();
+      const copilotMsgId = createChatMessageId("copilot");
       const copilotMsg: ChatMessage = {
         id: copilotMsgId,
         sender: "copilot",
@@ -465,8 +495,9 @@ function CopilotChatInner() {
       if (autoSpeakRef.current && response.answer) {
         speakMessage(copilotMsgId, response.answer);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to get answer from AI Assistant.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to get answer from AI Assistant.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -527,7 +558,7 @@ function CopilotChatInner() {
           mediaStreamRef.current = null;
         }
 
-        const durationSec = (Date.now() - recordingStartTimeRef.current) / 1000;
+        const durationSec = (getTimestampNow() - recordingStartTimeRef.current) / 1000;
         const mime = recorder.mimeType || "audio/webm";
         const audioBlob = new Blob(audioChunksRef.current, { type: mime });
 
@@ -555,7 +586,7 @@ function CopilotChatInner() {
       };
 
       recorder.start(200);
-      recordingStartTimeRef.current = Date.now();
+      recordingStartTimeRef.current = getTimestampNow();
       hasSpokenRef.current = false;
 
       // Start Web Audio VAD monitoring for natural silence completion
@@ -568,13 +599,14 @@ function CopilotChatInner() {
         }
       });
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       setContinuousActive(false);
       setContinuousState("idle");
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      const errObj = err as { name?: string; message?: string };
+      if (errObj.name === "NotAllowedError" || errObj.name === "PermissionDeniedError") {
         setError("Microphone permission was denied. Please allow microphone access to use voice conversation.");
       } else {
-        setError(`Microphone error: ${err.message || "Failed to access microphone hardware."}`);
+        setError(`Microphone error: ${errObj.message || "Failed to access microphone hardware."}`);
       }
     }
   };
@@ -585,7 +617,7 @@ function CopilotChatInner() {
    */
   const setupVADMonitoring = (stream: MediaStream, onSpeechEnd: () => void) => {
     try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextClass) return;
 
       const audioCtx = new AudioContextClass();
@@ -599,7 +631,7 @@ function CopilotChatInner() {
 
       const buffer = new Uint8Array(analyser.frequencyBinCount);
       let silenceStart: number | null = null;
-      const startTime = Date.now();
+      const startTime = getTimestampNow();
 
       const monitorLoop = () => {
         if (!analyserRef.current || continuousStateRef.current !== "listening") return;
@@ -613,15 +645,15 @@ function CopilotChatInner() {
         setAudioLevel(Math.min(100, Math.round((avg / 120) * 100)));
 
         const speechThreshold = 12; // Voice presence threshold
-        const elapsed = Date.now() - startTime;
+        const elapsed = getTimestampNow() - startTime;
 
         if (avg > speechThreshold) {
           hasSpokenRef.current = true;
           silenceStart = null;
         } else if (hasSpokenRef.current && elapsed > 1200) {
           if (!silenceStart) {
-            silenceStart = Date.now();
-          } else if (Date.now() - silenceStart > 1300) {
+            silenceStart = getTimestampNow();
+          } else if (getTimestampNow() - silenceStart > 1300) {
             // 1.3s of post-speech silence detected -> complete user turn
             stopAudioAnalyser();
             onSpeechEnd();
@@ -675,7 +707,7 @@ function CopilotChatInner() {
         }
       );
 
-      const userMsgId = Date.now().toString();
+      const userMsgId = createChatMessageId("user");
       const userMsg: ChatMessage = {
         id: userMsgId,
         sender: "user",
@@ -684,7 +716,7 @@ function CopilotChatInner() {
         mode: currentMode,
       };
 
-      const copilotMsgId = (Date.now() + 1).toString();
+      const copilotMsgId = createChatMessageId("copilot");
       const copilotMsg: ChatMessage = {
         id: copilotMsgId,
         sender: "copilot",
@@ -719,12 +751,13 @@ function CopilotChatInner() {
         }
       });
 
-    } catch (err: any) {
-      if (err.name === "AbortError") {
+    } catch (err: unknown) {
+      const errObj = err as { name?: string; message?: string };
+      if (errObj.name === "AbortError") {
         setContinuousState("idle");
         return;
       }
-      setError(err.message || "Failed to process voice query.");
+      setError(errObj.message || "Failed to process voice query.");
 
       // Resume listening or idle on error
       if (continuousActiveRef.current && continuousStateRef.current !== "paused") {
@@ -844,19 +877,20 @@ function CopilotChatInner() {
       };
 
       recorder.start(250);
-      recordingStartTimeRef.current = Date.now();
+      recordingStartTimeRef.current = getTimestampNow();
       setRecordingSeconds(0);
       setPushVoiceState("recording");
 
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
       }, 1000);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPushVoiceState("idle");
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      const errObj = err as { name?: string; message?: string };
+      if (errObj.name === "NotAllowedError" || errObj.name === "PermissionDeniedError") {
         setError("Microphone permission was denied. Please allow microphone access to record.");
       } else {
-        setError(`Microphone error: ${err.message || "Failed to access microphone."}`);
+        setError(`Microphone error: ${errObj.message || "Failed to access microphone."}`);
       }
     }
   };
@@ -867,7 +901,7 @@ function CopilotChatInner() {
       recordingTimerRef.current = null;
     }
 
-    const durationSec = (Date.now() - recordingStartTimeRef.current) / 1000;
+    const durationSec = (getTimestampNow() - recordingStartTimeRef.current) / 1000;
     const recorder = mediaRecorderRef.current;
 
     if (!recorder || recorder.state === "inactive") {
@@ -949,7 +983,7 @@ function CopilotChatInner() {
         }
       );
 
-      const userMsgId = Date.now().toString();
+      const userMsgId = createChatMessageId("user");
       const userMsg: ChatMessage = {
         id: userMsgId,
         sender: "user",
@@ -958,7 +992,7 @@ function CopilotChatInner() {
         mode: mode,
       };
 
-      const copilotMsgId = (Date.now() + 1).toString();
+      const copilotMsgId = createChatMessageId("copilot");
       const copilotMsg: ChatMessage = {
         id: copilotMsgId,
         sender: "copilot",
@@ -973,12 +1007,13 @@ function CopilotChatInner() {
       if (autoSpeakRef.current && response.answer) {
         speakMessage(copilotMsgId, response.answer);
       }
-    } catch (err: any) {
-      if (err.name === "AbortError") {
+    } catch (err: unknown) {
+      const errObj = err as { name?: string; message?: string };
+      if (errObj.name === "AbortError") {
         setPushVoiceState("idle");
         return;
       }
-      setError(err.message || "Failed to process voice question.");
+      setError(errObj.message || "Failed to process voice question.");
       setPushVoiceState("idle");
     } finally {
       abortControllerRef.current = null;

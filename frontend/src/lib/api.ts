@@ -199,6 +199,36 @@ export async function summarizeMeeting(id: string): Promise<SummarizeResponse> {
   return res.json();
 }
 
+export async function toggleActionItem(
+  meetingId: string,
+  itemId: number,
+  completed?: boolean
+): Promise<ActionItem> {
+  const res = await fetch(`${API_BASE}/api/meetings/${meetingId}/action-items/${itemId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(completed !== undefined ? { completed } : {}),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to update task (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function generateEmailDraft(
+  meetingId: string
+): Promise<{ meeting_id: string; email_draft: string }> {
+  const res = await fetch(`${API_BASE}/api/meetings/${meetingId}/email-draft`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to generate email draft (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function askCopilot(
   query: string,
   meetingIdOrOptions?: string | ChatOptions

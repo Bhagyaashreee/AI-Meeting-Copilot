@@ -21,7 +21,8 @@ from app.db import (
     get_meeting_details,
     search_transcripts,
     save_meeting_summary_and_action_items,
-    get_meeting_segments
+    get_meeting_segments,
+    toggle_action_item_completed
 )
 from app.services.transcriber import transcription_service
 from app.services.summarizer import summarizer_service
@@ -31,7 +32,9 @@ from app.models import (
     MeetingDetailResponse,
     TranscriptSegmentResponse,
     SummarizeResponse,
-    ActionItemResponse
+    ActionItemResponse,
+    ActionItemUpdateRequest,
+    EmailDraftResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -130,7 +133,7 @@ async def upload_and_transcribe_audio(
     try:
         segments = transcription_result["segments"]
         duration = transcription_result["duration_seconds"]
-        
+
         save_transcript_segments(meeting_id, segments)
         update_meeting_status(meeting_id, status="completed", duration_seconds=duration)
     except Exception as e:
@@ -285,3 +288,72 @@ async def summarize_meeting(meeting_id: str):
         key_decisions=summary_result["key_decisions"],
         action_items=[ActionItemResponse(**item) for item in summary_result["action_items"]]
     )
+
+@router.patch("/{meeting_id}/action-items/{item_id}", response_model=ActionItemResponse)
+async def update_action_item_completion(
+    meeting_id: str,
+    item_id: int,
+    payload: Optional[ActionItemUpdateRequest] = None
+):
+    """
+    Toggle or update the completion status of an action item in SQLite.
+    Allows users to check off tasks directly from the meeting details view.
+    """
+    completed_val = payload.completed if payload is not None else None
+    updated = toggle_action_item_completed(
+        meeting_id=meeting_id,
+        item_id=item_id,
+        completed=completed_val
+    )
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Action item #{item_id} for meeting '{meeting_id}' not found."
+        )
+    return ActionItemResponse(**updated)
+
+@router.post("/{meeting_id}/email-draft", response_model=EmailDraftResponse)
+async def generate_meeting_email_draft(meeting_id: str):
+    """
+    Generate an executive follow-up email draft grounded in meeting decisions and action items.
+    Uses local Ollama llama3.2:3b to draft a clean stakeholder email.
+    """
+    meeting = get_meeting_details(meeting_id)
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Meeting with ID '{meeting_id}' not found."
+        )
+
+    summary_raw = meeting.get("summary")
+    action_items = meeting.get("action_items", [])
+
+    # Parse summary content
+    summary_data = {}
+    if summary_raw:
+        try:
+            summary_data = json.loads(summary_raw)
+        except Exception:
+            summary_data = {"executive_summary": summary_raw}
+    summary_data["action_items"] = action_items
+
+    # If no summary exists yet, provide friendly fallback
+    if not summary_data.get("executive_summary") and not action_items:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot generate follow-up email before meeting summary or action items have been extracted."
+        )
+
+    try:
+        draft = await summarizer_service.generate_followup_email(
+            meeting_title=meeting.get("title", "Meeting"),
+            created_at=meeting.get("created_at", ""),
+            summary_data=summary_data
+        )
+        return EmailDraftResponse(meeting_id=meeting_id, email_draft=draft)
+    except Exception as e:
+        logger.error(f"Failed to generate follow-up email for meeting {meeting_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate email draft."
+        )

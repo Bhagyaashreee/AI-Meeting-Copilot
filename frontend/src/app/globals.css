@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 :root {
-  --background: #090d16;
+  --background: #080c14;
   --surface: #0f172a;
-  --surface-raised: #1e293b;
+  --surface-raised: #172033;
   --border-subtle: #1e293b;
   --border-prominent: #334155;
   --foreground: #f8fafc;
@@ -16,18 +16,26 @@
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Custom scrollbar for transcript and chat */
+/* Accessible focus styling */
+:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+/* Custom scrollbar for transcripts and chats */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #090d16;
+  background: #080c14;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -39,29 +47,58 @@ body {
   background: #334155;
 }
 
-/* Sound wave animations for voice chat */
+/* Voice assistant sound wave animations */
 @keyframes soundwave {
   0%, 100% {
     height: 6px;
+    opacity: 0.5;
   }
   50% {
-    height: 22px;
+    height: 24px;
+    opacity: 1;
   }
 }
 
 .animate-soundwave-1 {
-  animation: soundwave 0.9s ease-in-out infinite;
+  animation: soundwave 0.85s ease-in-out infinite;
 }
 .animate-soundwave-2 {
-  animation: soundwave 0.9s ease-in-out infinite 0.2s;
+  animation: soundwave 0.85s ease-in-out infinite 0.18s;
 }
 .animate-soundwave-3 {
-  animation: soundwave 0.9s ease-in-out infinite 0.4s;
+  animation: soundwave 0.85s ease-in-out infinite 0.36s;
 }
 .animate-soundwave-4 {
-  animation: soundwave 0.9s ease-in-out infinite 0.15s;
+  animation: soundwave 0.85s ease-in-out infinite 0.12s;
 }
 .animate-soundwave-5 {
-  animation: soundwave 0.9s ease-in-out infinite 0.35s;
+  animation: soundwave 0.85s ease-in-out infinite 0.3s;
 }
 
+/* Subtle glow animation for live recording */
+@keyframes soft-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.97);
+  }
+}
+
+.animate-soft-pulse {
+  animation: soft-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Reduced-motion accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

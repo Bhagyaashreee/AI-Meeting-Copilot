@@ -55,6 +55,13 @@ class SummarizeResponse(BaseModel):
     key_decisions: List[str]
     action_items: List[ActionItemResponse]
 
+class ActionItemUpdateRequest(BaseModel):
+    completed: Optional[bool] = None
+
+class EmailDraftResponse(BaseModel):
+    meeting_id: str
+    email_draft: str
+
 class MessageItem(BaseModel):
     role: str
     content: str

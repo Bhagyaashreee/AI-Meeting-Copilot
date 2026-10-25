@@ -18,7 +18,11 @@ data/*.sqlite3
 # Audio recordings and user uploads (exclude private recordings, keep sample_meeting.wav for tests)
 data/audio/*
 !data/audio/.gitkeep
-!data/sample_meeting.wav
+data/*.wav
+data/*.mp3
+data/*.m4a
+data/*.ogg
+data/*.webm
 
 # Environment variables
 .env
