@@ -4,6 +4,7 @@ import re
 from typing import Dict, Any, List, Optional
 import httpx
 from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS
+from app.services.llm import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -96,43 +97,15 @@ class SummarizerService:
 
         prompt = f"Meeting Transcript:\n\"\"\"\n{transcript_text.strip()}\n\"\"\"\n\nProvide the structured JSON summary:"
 
-        payload = {
-            "model": self.model,
-            "system": SUMMARY_SYSTEM_PROMPT,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",  # Ollama native JSON mode
-            "options": {
-                "temperature": 0.1,  # Low temperature for factual precision
-                "num_predict": 1024
-            }
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json=payload
-                )
-
-                if response.status_code != 200:
-                    logger.error(f"Ollama returned HTTP {response.status_code}: {response.text}")
-                    raise RuntimeError(f"Ollama service error (HTTP {response.status_code})")
-
-                response_data = response.json()
-                raw_llm_output = response_data.get("response", "")
-
-        except httpx.ConnectError as e:
-            logger.error(f"Cannot connect to Ollama at {self.base_url}: {e}")
-            raise ConnectionError(
-                f"Could not connect to Ollama at {self.base_url}. Ensure the Ollama service is active."
-            )
-        except httpx.TimeoutException as e:
-            logger.error(f"Ollama timed out after {OLLAMA_TIMEOUT_SECONDS}s: {e}")
-            raise TimeoutError("Local AI service timed out while processing meeting summary.")
-        except Exception as e:
-            logger.error(f"Unexpected error communicating with Ollama: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to communicate with local AI service: {str(e)}")
+        raw_llm_output = await llm_service.generate(
+            prompt=prompt,
+            system=SUMMARY_SYSTEM_PROMPT,
+            format_json=True,
+            temperature=0.1,
+            max_tokens=1024,
+            base_url=self.base_url if self.base_url != OLLAMA_BASE_URL.rstrip("/") else None,
+            model=self.model if self.model != OLLAMA_MODEL else None,
+        )
 
         # Parse and sanitize output
         parsed_data = extract_json_from_text(raw_llm_output)
@@ -224,22 +197,14 @@ Guidelines:
 4. Conclude with an open, professional invitation for corrections or questions.
 5. STRICT INTEGRITY: Do not invent names, dates, or details not present in the summary above.
 """
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.2,
-                "num_predict": 750
-            }
-        }
-
         try:
-            async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
-                response = await client.post(f"{self.base_url}/api/generate", json=payload)
-                if response.status_code == 200:
-                    return response.json().get("response", "").strip()
-                raise RuntimeError(f"Ollama returned HTTP {response.status_code}")
+            return await llm_service.generate(
+                prompt=prompt,
+                temperature=0.2,
+                max_tokens=750,
+                base_url=self.base_url if self.base_url != OLLAMA_BASE_URL.rstrip("/") else None,
+                model=self.model if self.model != OLLAMA_MODEL else None,
+            )
         except Exception as e:
             logger.error(f"Error generating follow-up email draft: {e}", exc_info=True)
             # Fallback draft if Ollama is unreachable

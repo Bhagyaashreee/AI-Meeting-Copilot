@@ -1,4 +1,4 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 
 export interface TranscriptSegment {
   id?: number;
@@ -338,12 +338,41 @@ export function getAudioUrl(meetingId: string): string {
 }
 
 export function getLiveWebSocketUrl(title?: string): string {
-  const wsProto = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
   let host = "localhost:8000";
+  let wsProto = "ws:";
   try {
     const url = new URL(API_BASE);
     host = url.host;
+    wsProto = url.protocol === "https:" ? "wss:" : "ws:";
   } catch {}
+
+  // If page is viewed on HTTPS, always upgrade to wss: to prevent mixed-content blocks
+  if (typeof window !== "undefined" && window.location.protocol === "https:") {
+    wsProto = "wss:";
+  }
+
   const q = title ? `?title=${encodeURIComponent(title)}` : "";
   return `${wsProto}//${host}/api/live/ws${q}`;
+}
+
+export interface HealthStatus {
+  status: string;
+  app: string;
+  version: string;
+  database?: string;
+  llm_provider?: string;
+  whisper_enabled?: boolean;
+  engine?: {
+    stt: string;
+    llm: string;
+    database: string;
+  };
+}
+
+export async function checkBackendHealth(): Promise<HealthStatus> {
+  const res = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Backend service unreachable or returned HTTP ${res.status}`);
+  }
+  return res.json();
 }

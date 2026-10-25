@@ -2,7 +2,8 @@ import logging
 from typing import Dict, Any, List, Optional
 import httpx
 
-from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS
+from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from app.services.llm import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -72,42 +73,16 @@ class AssistantService:
         # Append current user question
         messages.append({"role": "user", "content": cleaned_query})
 
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": 0.7,
-                "num_predict": 256
-            }
-        }
-
         try:
-            async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/chat",
-                    json=payload
-                )
-
-                if response.status_code != 200:
-                    logger.error(f"Ollama returned HTTP {response.status_code}: {response.text}")
-                    raise RuntimeError(f"Ollama service error (HTTP {response.status_code})")
-
-                response_data = response.json()
-                msg = response_data.get("message", {})
-                answer = (msg.get("content") or "").strip()
-
-        except httpx.ConnectError as e:
-            logger.error(f"Cannot connect to Ollama at {self.base_url}: {e}")
-            raise ConnectionError(
-                f"Could not connect to Ollama at {self.base_url}. Ensure the Ollama service is active."
+            answer = await llm_service.chat(
+                messages=messages,
+                temperature=0.7,
+                max_tokens=256,
+                base_url=self.base_url,
+                model=self.model,
             )
-        except httpx.TimeoutException as e:
-            logger.error(f"Ollama timed out during chat after {OLLAMA_TIMEOUT_SECONDS}s: {e}")
-            raise TimeoutError("Local AI service timed out while generating response.")
-        except Exception as e:
-            logger.error(f"Error querying Ollama in assistant service: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to query local AI service: {str(e)}")
+        except Exception:
+            raise
 
         return {
             "answer": answer or "I'm here! How can I help you today?",

@@ -2,8 +2,9 @@ import logging
 from typing import Dict, Any, List, Optional
 import httpx
 
-from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT_SECONDS
+from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL
 from app.db import retrieve_rag_context
+from app.services.llm import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -72,43 +73,14 @@ class RAGService:
             f"Question: {cleaned_query}\n\nAnswer:"
         )
 
-        payload = {
-            "model": self.model,
-            "system": RAG_SYSTEM_PROMPT,
-            "prompt": user_prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.2,  # Low temperature to prevent hallucination
-                "num_predict": 512
-            }
-        }
-
-        # 3. Call local Ollama
-        try:
-            async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/generate",
-                    json=payload
-                )
-
-                if response.status_code != 200:
-                    logger.error(f"Ollama returned HTTP {response.status_code}: {response.text}")
-                    raise RuntimeError(f"Ollama service error (HTTP {response.status_code})")
-
-                response_data = response.json()
-                answer = response_data.get("response", "").strip()
-
-        except httpx.ConnectError as e:
-            logger.error(f"Cannot connect to Ollama at {self.base_url}: {e}")
-            raise ConnectionError(
-                f"Could not connect to Ollama at {self.base_url}. Ensure the Ollama service is active."
-            )
-        except httpx.TimeoutException as e:
-            logger.error(f"Ollama timed out during Q&A after {OLLAMA_TIMEOUT_SECONDS}s: {e}")
-            raise TimeoutError("Local AI service timed out while generating answer.")
-        except Exception as e:
-            logger.error(f"Error querying Ollama in RAG service: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to query local AI service: {str(e)}")
+        answer = await llm_service.generate(
+            prompt=user_prompt,
+            system=RAG_SYSTEM_PROMPT,
+            temperature=0.2,
+            max_tokens=512,
+            base_url=self.base_url if self.base_url != OLLAMA_BASE_URL.rstrip("/") else None,
+            model=self.model if self.model != OLLAMA_MODEL else None,
+        )
 
         return {
             "answer": answer or "I could not find sufficient information in the recorded meetings to answer this question.",

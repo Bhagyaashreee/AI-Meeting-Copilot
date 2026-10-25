@@ -7,7 +7,8 @@ from app.config import (
     WHISPER_MODEL,
     WHISPER_DEVICE,
     WHISPER_COMPUTE_TYPE,
-    WHISPER_CPU_THREADS
+    WHISPER_CPU_THREADS,
+    WHISPER_ENABLED,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,12 @@ class TranscriptionService:
         return cls._instance
 
     def _get_model(self) -> WhisperModel:
+        if not WHISPER_ENABLED:
+            raise RuntimeError(
+                "Speech transcription is disabled on this server instance (WHISPER_ENABLED=false). "
+                "To transcribe audio, enable WHISPER_ENABLED or deploy on a machine with sufficient RAM."
+            )
+
         if self._model is None:
             with self._lock:
                 if self._model is None:
@@ -35,14 +42,21 @@ class TranscriptionService:
                         f"Loading faster-whisper model '{WHISPER_MODEL}' "
                         f"(device={WHISPER_DEVICE}, compute_type={WHISPER_COMPUTE_TYPE}, threads={WHISPER_CPU_THREADS})..."
                     )
-                    self._model = WhisperModel(
-                        model_size_or_path=WHISPER_MODEL,
-                        device=WHISPER_DEVICE,
-                        compute_type=WHISPER_COMPUTE_TYPE,
-                        cpu_threads=WHISPER_CPU_THREADS,
-                        num_workers=1
-                    )
-                    logger.info("faster-whisper model loaded successfully.")
+                    try:
+                        self._model = WhisperModel(
+                            model_size_or_path=WHISPER_MODEL,
+                            device=WHISPER_DEVICE,
+                            compute_type=WHISPER_COMPUTE_TYPE,
+                            cpu_threads=WHISPER_CPU_THREADS,
+                            num_workers=1
+                        )
+                        logger.info("faster-whisper model loaded successfully.")
+                    except (MemoryError, Exception) as e:
+                        logger.error(f"Failed to load faster-whisper model '{WHISPER_MODEL}': {e}", exc_info=True)
+                        raise RuntimeError(
+                            f"Failed to load Whisper model '{WHISPER_MODEL}' ({type(e).__name__}: {str(e)}). "
+                            "On memory-constrained servers (e.g., Render 512MB RAM), use WHISPER_MODEL=tiny or set WHISPER_ENABLED=false."
+                        )
         return self._model
 
     def transcribe_file(self, audio_path: Path) -> Dict[str, Any]:
