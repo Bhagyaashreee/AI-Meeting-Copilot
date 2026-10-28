@@ -12,9 +12,9 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: CORS_ORIGINS
-        value: http://localhost:3000
+        value: "http://localhost:3000,https://ai-meeting-copilot-livid.vercel.app"
       - key: CORS_ORIGIN_REGEX
-        value: "^https://.*\\.vercel\\.app$"
+        value: '^https://.*\.vercel\.app$'
       - key: WHISPER_MODEL
         value: tiny
       - key: WHISPER_ENABLED

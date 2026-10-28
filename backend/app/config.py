@@ -16,8 +16,17 @@ IS_RENDER = os.getenv("RENDER", "").lower() in ("true", "1", "yes")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production" if IS_RENDER else "development")
 
 # CORS Configuration
-CORS_ORIGINS = [orig.strip() for orig in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if orig.strip()]
-CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", r"^https://.*\.vercel\.app$")
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://ai-meeting-copilot-livid.vercel.app",
+]
+env_origins = [orig.strip() for orig in os.getenv("CORS_ORIGINS", "").split(",") if orig.strip()]
+CORS_ORIGINS = list(dict.fromkeys(DEFAULT_CORS_ORIGINS + env_origins))
+
+# Normalize potential double backslash escaping from YAML/environment strings
+raw_origin_regex = os.getenv("CORS_ORIGIN_REGEX", r"^https://.*\.vercel\.app$").strip()
+CORS_ORIGIN_REGEX = raw_origin_regex.replace(r"\\.", r"\.") if raw_origin_regex else r"^https://.*\.vercel\.app$"
 
 # Whisper Configuration (Optimized for local CPU, configurable for low-memory Render)
 WHISPER_ENABLED = os.getenv("WHISPER_ENABLED", "true").lower() in ("true", "1", "yes")

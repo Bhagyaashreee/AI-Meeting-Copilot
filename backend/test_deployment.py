@@ -39,6 +39,20 @@ def test_cors_vercel_preview_regex():
     assert res.headers.get("access-control-allow-origin") == preview_origin
     print("   [PASS] CORS regex dynamically allows Vercel preview URLs.")
 
+def test_cors_production_vercel_domain_allowed():
+    """Verify production Vercel frontend is explicitly allowed."""
+    prod_origin = "https://ai-meeting-copilot-livid.vercel.app"
+    res = client.options(
+        "/api/meetings",
+        headers={
+            "Origin": prod_origin,
+            "Access-Control-Request-Method": "GET"
+        }
+    )
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == prod_origin
+    print("   [PASS] CORS production Vercel domain explicitly allowed.")
+
 def test_cors_localhost_allowed():
     """Verify standard localhost origins remain permitted."""
     res = client.options(

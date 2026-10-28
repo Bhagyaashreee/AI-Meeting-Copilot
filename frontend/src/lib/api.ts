@@ -1,4 +1,8 @@
-export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
+export const API_BASE = (
+  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
+    ? process.env.NEXT_PUBLIC_API_URL.trim()
+    : "") || "http://localhost:8000"
+).replace(/\/+$/, "");
 
 export interface TranscriptSegment {
   id?: number;
@@ -341,7 +345,12 @@ export function getLiveWebSocketUrl(title?: string): string {
   let host = "localhost:8000";
   let wsProto = "ws:";
   try {
-    const url = new URL(API_BASE);
+    const base = API_BASE.startsWith("http")
+      ? API_BASE
+      : typeof window !== "undefined"
+      ? window.location.origin
+      : "http://localhost:8000";
+    const url = new URL(base);
     host = url.host;
     wsProto = url.protocol === "https:" ? "wss:" : "ws:";
   } catch {}
