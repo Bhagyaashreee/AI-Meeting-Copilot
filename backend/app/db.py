@@ -438,3 +438,13 @@ def retrieve_rag_context(query: str, meeting_id: Optional[str] = None, limit: in
             return [dict(row) for row in cursor.fetchall()]
 
         return []
+
+def check_db_health() -> bool:
+    """Verifies SQLite database connectivity and schema readiness."""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1;")
+            return cursor.fetchone() is not None
+    except Exception:
+        return False

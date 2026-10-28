@@ -19,7 +19,8 @@ import {
   uploadAudio, 
   MeetingSummary, 
   formatDuration, 
-  formatDate 
+  formatDate,
+  API_BASE,
 } from "@/lib/api";
 
 export default function DashboardPage() {
@@ -160,7 +161,7 @@ export default function DashboardPage() {
             <p className="font-semibold">Backend Connection Issue</p>
             <p className="text-xs text-rose-300/80 mt-0.5">{error}</p>
             <p className="text-xs text-rose-300/60 mt-1">
-              Make sure your FastAPI server is running at <code className="bg-rose-900/40 px-1 py-0.5 rounded">http://localhost:8000</code>.
+              Make sure your FastAPI server is running at <code className="bg-rose-900/40 px-1 py-0.5 rounded">{API_BASE}</code>.
             </p>
           </div>
         </div>

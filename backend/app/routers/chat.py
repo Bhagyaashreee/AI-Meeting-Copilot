@@ -108,7 +108,7 @@ async def _process_audio_upload(file: UploadFile) -> tuple[str, dict]:
                 )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Speech transcription failed during audio processing."
+                detail=f"Speech transcription failed: {str(e)}"
             )
 
         transcribed_text = (transcription_result.get("full_text") or "").strip()

@@ -126,7 +126,7 @@ async def upload_and_transcribe_audio(
         update_meeting_status(meeting_id, status="failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Speech transcription failed during audio processing."
+            detail=f"Speech transcription failed: {str(e)}"
         )
 
     # 7. Persist segments into SQLite and update meeting status
